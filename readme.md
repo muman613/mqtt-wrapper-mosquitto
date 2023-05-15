@@ -7,3 +7,5 @@ This repository contains the code used to create an MQTT connection with a broke
 ## mqttgui
 
 The mqtt GUI application demonstrates the usage of the mqtt wrapper class.
+
+![GUI-SCREENSHOT](images/mqtt-gui.png)
