@@ -5,15 +5,17 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QSettings>
+#include <QDateTime>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow) {
+        : QMainWindow(parent), ui(new Ui::MainWindow) {
     qDebug() << Q_FUNC_INFO;
     // qInfo() << "endpoint = " << endpoint;
 
     ui->setupUi(this);
 
     connect(&mqtt, &mqttWrapper::onMessage, this, &MainWindow::onMessage);
+    connect(&mqtt, &mqttWrapper::onConnectionChanged, this, &MainWindow::onConnectionChanged);
 
     restoreOptions();
 }
@@ -45,16 +47,8 @@ void MainWindow::on_subButton_clicked() {
     QString subTopic = ui->subTopic->text();
 
     if (mqtt.subscribe(subTopic, 1)) {
-        ui->messageText->append(QString("Subscribed to topic %1").arg(subTopic));
+        displayMessage(QString("Subscribed to topic %1").arg(subTopic));
     }
-
-//    mqtt.subscribe(subTopic.toStdString().c_str(), [&](String topic, ByteBuf buf) {
-//        QString topicMsg = QString("topic : ") + topic.c_str();
-//        QString msgMsg = QString::fromLatin1((const char *)buf.buffer, buf.len);
-//        ui->messageText->append(topicMsg);
-//        ui->messageText->append(msgMsg);
-//        ui->messageText->ensureCursorVisible();
-//    });
 }
 
 void MainWindow::on_unSubButton_clicked() {
@@ -62,9 +56,9 @@ void MainWindow::on_unSubButton_clicked() {
     QString subTopic = ui->subTopic->text();
 
     if (mqtt.unsubscribe(subTopic)) {
-        qDebug() << "OK";
+        displayMessage(QString("Unsubscribed from topic %1").arg(subTopic));
     } else {
-        qWarning() << "Unable to unsubscribe from topic :" << subTopic;
+        displayMessage(QString("Unable to unsubscribe from topic %1").arg(subTopic));
     }
 }
 
@@ -100,10 +94,11 @@ void MainWindow::on_loadButton_clicked() {
     }
 }
 
-void MainWindow::on_actionAbout_mqttgui_triggered() { QMessageBox::about(this, "mqttgui", "Qt Based MQTT using Mosquitto Client"); }
+void MainWindow::on_actionAbout_mqttgui_triggered() {
+    QMessageBox::about(this, "mqttgui", "Qt Based MQTT using Mosquitto Client");
+}
 
-void MainWindow::on_connectButton_clicked()
-{
+void MainWindow::on_connectButton_clicked() {
     if (mqtt.property("connected").toBool() == false) {
         QString host = ui->brokerCombo->currentText();
         int port = ui->port->text().toInt();
@@ -119,7 +114,7 @@ void MainWindow::on_connectButton_clicked()
 }
 
 void MainWindow::onMessage(QString topic, QByteArray payload) {
-    ui->messageText->append(QString("%1: %2").arg(topic, QString::fromLocal8Bit(payload)));
+    displayMessage(QString("%1: %2").arg(topic, QString::fromLocal8Bit(payload)));
 }
 
 void MainWindow::restoreOptions() {
@@ -129,11 +124,11 @@ void MainWindow::restoreOptions() {
     auto brokers = settings.value("brokers").toString();
     auto broker_list = brokers.split(':', QString::SkipEmptyParts);
 
-    for (const auto broker : broker_list) {
+    for (const auto broker: broker_list) {
         ui->brokerCombo->addItem(broker);
     }
 
-    auto port = settings.value("port").toString();
+    auto port = settings.value("broker_port_").toString();
     ui->port->setText(port);
 
     settings.endGroup();
@@ -142,16 +137,31 @@ void MainWindow::restoreOptions() {
 void MainWindow::saveOptions() {
     QSettings settings("softwaremagic", "mqttwrapper", this);
     QStringList broker_list;
-    for (int index = 0 ; index < ui->brokerCombo->count() ; index++) {
+    for (int index = 0; index < ui->brokerCombo->count(); index++) {
         auto broker = ui->brokerCombo->itemText(index);
         broker_list.append(broker);
     }
     settings.beginGroup("options");
     settings.setValue("brokers", broker_list.join(':'));
     auto port = ui->port->text().toInt();
-    settings.setValue("port", port);
+    settings.setValue("broker_port_", port);
     settings.endGroup();
+}
 
+void MainWindow::displayMessage(const QString &msg) {
+    QDateTime ts = QDateTime::currentDateTime();
+    auto time_stamp = ts.toString();
+    ui->messageText->append(QString("%1 : %2").arg(time_stamp).arg(msg));
+    ui->messageText->ensureCursorVisible();
+}
 
+void MainWindow::onConnectionChanged(bool connected) {
+    if (connected) {
+        auto port = mqtt.property("port").toInt();
+        auto host = mqtt.property("host").toString();
 
+        displayMessage(QString("Connected to broker %1 port %2").arg(host).arg(port));
+    } else {
+        displayMessage("Disconnected");
+    }
 }

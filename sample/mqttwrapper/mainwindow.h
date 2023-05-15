@@ -33,6 +33,7 @@ class MainWindow : public QMainWindow {
     void on_connectButton_clicked();
 
     void onMessage(QString topic, QByteArray payload);
+    void onConnectionChanged(bool connected);
 
 private:
     Ui::MainWindow *ui;
@@ -42,5 +43,7 @@ private:
 
     void restoreOptions();
     void saveOptions();
+
+    void displayMessage(const QString &msg);
 };
 #endif // MAINWINDOW_H
