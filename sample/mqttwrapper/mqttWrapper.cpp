@@ -5,11 +5,13 @@
  */
 
 #include <QDebug>
-#include <functional>
+//#include <functional>
 #include <utility>
+#include <sys/types.h>
+#include <unistd.h>
 #include "mqttWrapper.h"
 
-using namespace std::placeholders;
+//using namespace std::placeholders;
 
 static void displayMosquittoVersion() {
     int maj, min, rev;
@@ -17,12 +19,20 @@ static void displayMosquittoVersion() {
     qDebug().nospace() << "Version : " << maj << '.' << min << '.' << rev;
 }
 
-mqttWrapper::mqttWrapper(QString id) : conn_id(std::move(id)) {
+static QString client_id_generate(QString base_id) {
+    QString client_id;
+    auto pid = getpid();
+    client_id = QString("%1-%2").arg(base_id).arg(pid);
+    return client_id;
+}
+
+
+mqttWrapper::mqttWrapper(QString id) : conn_id_(std::move(client_id_generate(id))) {
     qDebug() << Q_FUNC_INFO;
     mosquitto_lib_init();
     displayMosquittoVersion();
 
-    mosq = mosquitto_new(conn_id.toStdString().c_str(), true, this);
+    mosq = mosquitto_new(conn_id_.toStdString().c_str(), true, this);
     qDebug() << errno;
 
 //    auto cb = std::bind(&mqttWrapper::log_callback_, this, _1, _2, _3, 4);
@@ -49,19 +59,20 @@ mqttWrapper::~mqttWrapper() {
 
 bool mqttWrapper::connect(const QString &host, int port) {
     qDebug() << Q_FUNC_INFO;
-    port = port;
     auto rc = mosquitto_connect_async(mosq, host.toStdString().c_str(), port, 60);
     if (rc == MOSQ_ERR_SUCCESS) {
         rc = mosquitto_loop_start(mosq);
         if (rc != MOSQ_ERR_SUCCESS) {
-            qWarning() << "Event loop failed to start";
+            qWarning() << "Event loop failed to start" << strerror(errno);
         } else {
+            broker_port_ = port;
+            broker_host_ = host;
             qInfo() << "Connection OK";
             emit onConnectionChanged(true);
             connected = true;
         }
     } else {
-        qWarning() << "Unable to connect to broken :" << host << "port :" << port;
+        qWarning() << "Unable to connect to broker :" << host << "broker_port_ :" << port;
     }
 
     return connected;
@@ -92,7 +103,11 @@ bool mqttWrapper::getConnected() {
 }
 
 QString mqttWrapper::getHost() {
-    return host;
+    return broker_host_;
+}
+
+int mqttWrapper::getPort() {
+    return broker_port_;
 }
 
 bool mqttWrapper::subscribe(const QString &topic, int qos) {
@@ -108,12 +123,12 @@ bool mqttWrapper::subscribe(const QString &topic, int qos) {
     return result;
 }
 
-bool  mqttWrapper::unsubscribe(const QString &topic) {
+bool mqttWrapper::unsubscribe(const QString &topic) {
     qDebug() << Q_FUNC_INFO;
     bool result = false;
     if (mosq and connected) {
         int mid = -1;
-        auto rc =mosquitto_unsubscribe(mosq, &mid, topic.toStdString().c_str());
+        auto rc = mosquitto_unsubscribe(mosq, &mid, topic.toStdString().c_str());
         if (rc == MOSQ_ERR_SUCCESS) {
             result = true;
         } else {
