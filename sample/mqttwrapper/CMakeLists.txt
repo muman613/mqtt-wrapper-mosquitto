@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets DBus REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets DBus REQUIRED)
 
-pkg_check_modules(LIBMOSQUITTO REQUIRED libmosquitto)
+pkg_check_modules(LIBMOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
 set(PROJECT_SOURCES
         main.cpp
@@ -21,4 +21,15 @@ set(PROJECT_SOURCES
         mainwindow.ui)
 
 add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
-target_link_libraries(${PROJECT_NAME} PRIVATE Qt${QT_VERSION_MAJOR}::Widgets ${LIBMOSQUITTO_LIBRARIES})
+
+if(ENABLE_DEBUG_LOGGING)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE MQTTWRAPPER_DEBUG_LOGGING)
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE QT_NO_DEBUG_OUTPUT)
+endif()
+
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        Qt${QT_VERSION_MAJOR}::Widgets
+        PkgConfig::LIBMOSQUITTO
+)

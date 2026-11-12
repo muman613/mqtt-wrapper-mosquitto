@@ -37,13 +37,13 @@ public slots:
      *
      * @param host Broker host address
      * @param port Broker port (default 1883)
-     * @return true on success, false on failure.
+     * @return true if the asynchronous connection attempt was started.
      */
     bool connect(const QString &host, int port = 1883);
     /**
      * Disconnect from a connected broker.
      *
-     * @return true on success, false on failure.
+     * @return true if already disconnected or the asynchronous disconnect was started.
      */
     bool disconnect();
     /**
@@ -87,6 +87,13 @@ signals:
 
 private:
 
+    enum class ConnectionState {
+        Disconnected,
+        Connecting,
+        Connected,
+        Disconnecting
+    };
+
     bool getConnected();
 
     QString getHost();
@@ -105,6 +112,8 @@ private:
 
     void subscribe_callback(struct mosquitto *, int mid, int qos_count, const int *granted_qos,
                             const mosquitto_property *props);
+
+    void finishDisconnect(int reasonCode);
 
     static void log_callback_(mosquitto *mosq, void *obj, int level, const char *str);
 
@@ -126,7 +135,8 @@ private:
     int broker_port_;       // Broker port #
 
     mosquitto *mosq = nullptr;
-    bool connected = false;
+    ConnectionState connection_state_ = ConnectionState::Disconnected;
+    bool loop_running_ = false;
 
     QStringList topics;
 };

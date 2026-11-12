@@ -5,6 +5,7 @@
  */
 
 #include <QDebug>
+#include <QMetaObject>
 //#include <functional>
 #include <utility>
 #include <sys/types.h>
@@ -37,7 +38,9 @@ mqttWrapper::mqttWrapper(QString id) : conn_id_(std::move(client_id_generate(id)
 
 //    auto cb = std::bind(&mqttWrapper::log_callback_, this, _1, _2, _3, 4);
 
+#ifdef MQTTWRAPPER_DEBUG_LOGGING
     mosquitto_log_callback_set(mosq, log_callback_);
+#endif
 
     mosquitto_connect_v5_callback_set(mosq, connect_callback_);
     mosquitto_disconnect_v5_callback_set(mosq, disconnect_callback_);
@@ -48,9 +51,10 @@ mqttWrapper::mqttWrapper(QString id) : conn_id_(std::move(client_id_generate(id)
 
 mqttWrapper::~mqttWrapper() {
     qDebug() << Q_FUNC_INFO;
-    if (mosq and connected) {
-        qDebug() << "Disconnecting...";
-        disconnect();
+    if (mosq && loop_running_) {
+        mosquitto_disconnect(this->mosq);
+        mosquitto_loop_stop(mosq, false);
+        loop_running_ = false;
     }
     mosquitto_destroy(mosq);
     mosq = nullptr;
@@ -59,47 +63,60 @@ mqttWrapper::~mqttWrapper() {
 
 bool mqttWrapper::connect(const QString &host, int port) {
     qDebug() << Q_FUNC_INFO;
-    auto rc = mosquitto_connect_async(mosq, host.toStdString().c_str(), port, 60);
-    if (rc == MOSQ_ERR_SUCCESS) {
-        rc = mosquitto_loop_start(mosq);
-        if (rc != MOSQ_ERR_SUCCESS) {
-            qWarning() << "Event loop failed to start" << strerror(errno);
-        } else {
-            broker_port_ = port;
-            broker_host_ = host;
-            qInfo() << "Connection OK";
-            emit onConnectionChanged(true);
-            connected = true;
-        }
-    } else {
-        qWarning() << "Unable to connect to broker :" << host << "broker_port_ :" << port;
+    if (!mosq || connection_state_ != ConnectionState::Disconnected) {
+        return false;
     }
 
-    return connected;
+    auto rc = mosquitto_connect_async(mosq, host.toStdString().c_str(), port, 60);
+    if (rc == MOSQ_ERR_SUCCESS) {
+        connection_state_ = ConnectionState::Connecting;
+        rc = mosquitto_loop_start(mosq);
+        if (rc != MOSQ_ERR_SUCCESS) {
+            connection_state_ = ConnectionState::Disconnected;
+            qWarning() << "Event loop failed to start:" << mosquitto_strerror(rc);
+        } else {
+            loop_running_ = true;
+            broker_port_ = port;
+            broker_host_ = host;
+        }
+    } else {
+        qWarning() << "Unable to start connection to broker" << host << "port" << port << ':'
+                   << mosquitto_strerror(rc);
+    }
+
+    return connection_state_ == ConnectionState::Connecting;
 }
 
 bool mqttWrapper::disconnect() {
     qDebug() << Q_FUNC_INFO;
 
-    if (mosq and connected) {
+    if (!mosq || connection_state_ == ConnectionState::Disconnected) {
+        return true;
+    }
+
+    if (connection_state_ == ConnectionState::Disconnecting) {
+        return false;
+    }
+
+    if (loop_running_) {
         qDebug() << "Disconnecting";
         auto rc = mosquitto_disconnect(mosq);
         if (rc == MOSQ_ERR_SUCCESS) {
-            qDebug() << "Stopping mosquitto event loop";
-            mosquitto_loop_stop(mosq, true);
-            emit onConnectionChanged(false);
-            connected = false;
+            connection_state_ = ConnectionState::Disconnecting;
+            return true;
         } else {
-            qWarning() << "Unable to disconnect";
+            qWarning() << "Unable to disconnect:" << mosquitto_strerror(rc);
+            return false;
         }
     }
 
-    return (connected == false);
+    finishDisconnect(MOSQ_ERR_SUCCESS);
+    return true;
 }
 
 
 bool mqttWrapper::getConnected() {
-    return connected;
+    return connection_state_ == ConnectionState::Connected;
 }
 
 QString mqttWrapper::getHost() {
@@ -113,7 +130,7 @@ int mqttWrapper::getPort() {
 bool mqttWrapper::subscribe(const QString &topic, int qos) {
     bool result = false;
     qDebug() << Q_FUNC_INFO;
-    if (mosq and connected) {
+    if (mosq && getConnected()) {
         int mid = -1;
         mosquitto_subscribe(mosq, &mid, topic.toStdString().c_str(), qos);
         result = true;
@@ -126,7 +143,7 @@ bool mqttWrapper::subscribe(const QString &topic, int qos) {
 bool mqttWrapper::unsubscribe(const QString &topic) {
     qDebug() << Q_FUNC_INFO;
     bool result = false;
-    if (mosq and connected) {
+    if (mosq && getConnected()) {
         int mid = -1;
         auto rc = mosquitto_unsubscribe(mosq, &mid, topic.toStdString().c_str());
         if (rc == MOSQ_ERR_SUCCESS) {
@@ -143,12 +160,12 @@ bool mqttWrapper::unsubscribe(const QString &topic) {
 bool mqttWrapper::publish(const QString &topic, const QByteArray &payload, int qos, bool retain) {
     bool result = false;
 
-    if (mosq and connected) {
+    if (mosq && getConnected()) {
         int mid = -1;
         auto rc = mosquitto_publish(mosq, &mid, topic.toStdString().c_str(), payload.length(), payload.data(), qos,
                                     retain);
         if (rc == MOSQ_ERR_SUCCESS) {
-            qInfo() << "Published message #" << mid << "to topic" << topic;
+            qDebug() << "Published message #" << mid << "to topic" << topic;
             result = true;
         } else {
             qWarning() << "error" << strerror(errno);
@@ -167,13 +184,45 @@ void mqttWrapper::log_callback(mosquitto *mosq, int level, const char *str) {
 
 
 void mqttWrapper::connect_callback(mosquitto *mosq, int rc, int flags, const mosquitto_property *props) {
-    qDebug() << Q_FUNC_INFO;
+    qDebug() << Q_FUNC_INFO << rc;
+    QMetaObject::invokeMethod(this, [this, rc]() {
+        if (connection_state_ != ConnectionState::Connecting) {
+            return;
+        }
 
+        if (rc == MOSQ_ERR_SUCCESS) {
+            connection_state_ = ConnectionState::Connected;
+            qDebug() << "Connected to broker" << broker_host_ << "port" << broker_port_;
+            emit onConnectionChanged(true);
+            return;
+        }
+
+        qWarning() << "Broker connection failed:" << mosquitto_connack_string(rc);
+        connection_state_ = ConnectionState::Disconnecting;
+        mosquitto_disconnect(this->mosq);
+        finishDisconnect(rc);
+    }, Qt::QueuedConnection);
 }
 
 void mqttWrapper::disconnect_callback(mosquitto *mosq, int rc, const mosquitto_property *props) {
-    qDebug() << Q_FUNC_INFO;
+    qDebug() << Q_FUNC_INFO << rc;
+    QMetaObject::invokeMethod(this, [this, rc]() {
+        finishDisconnect(rc);
+    }, Qt::QueuedConnection);
+}
 
+void mqttWrapper::finishDisconnect(int reasonCode) {
+    if (loop_running_) {
+        qDebug() << "Stopping mosquitto event loop";
+        mosquitto_loop_stop(mosq, reasonCode != MOSQ_ERR_SUCCESS);
+        loop_running_ = false;
+    }
+
+    const bool wasDisconnected = connection_state_ == ConnectionState::Disconnected;
+    connection_state_ = ConnectionState::Disconnected;
+    if (!wasDisconnected) {
+        emit onConnectionChanged(false);
+    }
 }
 
 
