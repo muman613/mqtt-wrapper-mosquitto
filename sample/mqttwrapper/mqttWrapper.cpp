@@ -165,7 +165,7 @@ bool mqttWrapper::publish(const QString &topic, const QByteArray &payload, int q
         auto rc = mosquitto_publish(mosq, &mid, topic.toStdString().c_str(), payload.length(), payload.data(), qos,
                                     retain);
         if (rc == MOSQ_ERR_SUCCESS) {
-            qInfo() << "Published message #" << mid << "to topic" << topic;
+            qDebug() << "Published message #" << mid << "to topic" << topic;
             result = true;
         } else {
             qWarning() << "error" << strerror(errno);
@@ -192,7 +192,7 @@ void mqttWrapper::connect_callback(mosquitto *mosq, int rc, int flags, const mos
 
         if (rc == MOSQ_ERR_SUCCESS) {
             connection_state_ = ConnectionState::Connected;
-            qInfo() << "Connected to broker" << broker_host_ << "port" << broker_port_;
+            qDebug() << "Connected to broker" << broker_host_ << "port" << broker_port_;
             emit onConnectionChanged(true);
             return;
         }
