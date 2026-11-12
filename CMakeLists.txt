@@ -1,6 +1,8 @@
-cmake_minimum_required(VERSION 3.2.0)
+cmake_minimum_required(VERSION 3.30.0)
 
 project(mqtt-service)
+
+option(ENABLE_DEBUG_LOGGING "Enable verbose Qt and Mosquitto debug logging" OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")

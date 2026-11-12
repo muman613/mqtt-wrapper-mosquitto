@@ -122,7 +122,7 @@ void MainWindow::restoreOptions() {
 
     settings.beginGroup("options");
     auto brokers = settings.value("brokers").toString();
-    auto broker_list = brokers.split(':', QString::SkipEmptyParts);
+    auto broker_list = brokers.split(':', Qt::SkipEmptyParts);
 
     for (const auto broker: broker_list) {
         ui->brokerCombo->addItem(broker);

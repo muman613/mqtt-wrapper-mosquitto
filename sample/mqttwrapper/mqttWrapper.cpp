@@ -37,7 +37,9 @@ mqttWrapper::mqttWrapper(QString id) : conn_id_(std::move(client_id_generate(id)
 
 //    auto cb = std::bind(&mqttWrapper::log_callback_, this, _1, _2, _3, 4);
 
+#ifdef MQTTWRAPPER_DEBUG_LOGGING
     mosquitto_log_callback_set(mosq, log_callback_);
+#endif
 
     mosquitto_connect_v5_callback_set(mosq, connect_callback_);
     mosquitto_disconnect_v5_callback_set(mosq, disconnect_callback_);

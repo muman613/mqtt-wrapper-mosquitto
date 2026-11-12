@@ -1,10 +1,38 @@
 #include <QDebug>
 #include <QApplication>
+#ifdef MQTTWRAPPER_DEBUG_LOGGING
+#include <QFile>
+#include <QMutex>
+#include <QTextStream>
+#endif
 
 #include "mqttWrapper.h"
 #include "mainwindow.h"
 
+#ifdef MQTTWRAPPER_DEBUG_LOGGING
+namespace {
+QMutex logMutex;
+
+void fileMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &message) {
+    QMutexLocker locker(&logMutex);
+    QFile logFile("mqttwrapper.log");
+
+    if (!logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        return;
+    }
+
+    QTextStream stream(&logFile);
+    stream << qFormatLogMessage(type, context, message) << Qt::endl;
+}
+}
+#endif
+
 int main(int argc, char *argv[]) {
+#ifdef MQTTWRAPPER_DEBUG_LOGGING
+    qSetMessagePattern("[%{time yyyy-MM-dd hh:mm:ss.zzz}] [%{type}] %{message}");
+    qInstallMessageHandler(fileMessageHandler);
+#endif
+
     QApplication a(argc, argv);
     MainWindow w;
     w.show();
