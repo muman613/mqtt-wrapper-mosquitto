@@ -71,6 +71,7 @@ void MainWindow::enableInterface(bool enabled) {
     ui->sendMessageText->setEnabled(enabled);
     ui->messageText->setEnabled(enabled);
     ui->loadButton->setEnabled(enabled);
+    ui->connectButton->setEnabled(true);
     if (enabled) {
         ui->connectButton->setText("Disconnect");
     } else {
@@ -104,11 +105,13 @@ void MainWindow::on_connectButton_clicked() {
         int port = ui->port->text().toInt();
 
         if (mqtt.connect(host, port)) {
-            enableInterface(true);
+            ui->connectButton->setText("Connecting...");
+            ui->connectButton->setEnabled(false);
         }
     } else {
         if (mqtt.disconnect()) {
-            enableInterface(false);
+            ui->connectButton->setText("Disconnecting...");
+            ui->connectButton->setEnabled(false);
         }
     }
 }
@@ -121,8 +124,13 @@ void MainWindow::restoreOptions() {
     QSettings settings("softwaremagic", "mqttwrapper", this);
 
     settings.beginGroup("options");
-    auto brokers = settings.value("brokers").toString();
-    auto broker_list = brokers.split(':', Qt::SkipEmptyParts);
+    const auto savedBrokers = settings.value("brokers");
+    auto broker_list = savedBrokers.toStringList();
+
+    // Support histories written by older versions as one colon-separated string.
+    if (broker_list.size() == 1 && broker_list.first().contains(':')) {
+        broker_list = broker_list.first().split(':', Qt::SkipEmptyParts);
+    }
 
     for (const auto broker: broker_list) {
         ui->brokerCombo->addItem(broker);
@@ -142,7 +150,7 @@ void MainWindow::saveOptions() {
         broker_list.append(broker);
     }
     settings.beginGroup("options");
-    settings.setValue("brokers", broker_list.join(':'));
+    settings.setValue("brokers", broker_list);
     auto port = ui->port->text().toInt();
     settings.setValue("broker_port_", port);
     settings.endGroup();
@@ -160,8 +168,18 @@ void MainWindow::onConnectionChanged(bool connected) {
         auto port = mqtt.property("port").toInt();
         auto host = mqtt.property("host").toString();
 
+        const int existingIndex = ui->brokerCombo->findText(host);
+        if (existingIndex >= 0) {
+            ui->brokerCombo->removeItem(existingIndex);
+        }
+        ui->brokerCombo->insertItem(0, host);
+        ui->brokerCombo->setCurrentIndex(0);
+        saveOptions();
+        enableInterface(true);
+
         displayMessage(QString("Connected to broker %1 port %2").arg(host).arg(port));
     } else {
+        enableInterface(false);
         displayMessage("Disconnected");
     }
 }
